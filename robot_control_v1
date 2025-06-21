@@ -1,0 +1,310 @@
+#include <AccelStepper.h>
+
+#define A_IN1 2
+#define A_IN2 3
+#define A_IN3 4
+#define A_IN4 5
+#define B_IN1 6
+#define B_IN2 7
+#define B_IN3 8
+#define B_IN4 9
+#define C_IN1 23
+#define C_IN2 25
+#define C_IN3 27
+#define C_IN4 29
+#define D_IN1 22
+#define D_IN2 24
+#define D_IN3 26
+#define D_IN4 28
+#define E_IN1 31
+#define E_IN2 33
+#define E_IN3 35
+#define E_IN4 37
+//F컨베이어밸트
+#define F_IN1 30
+#define F_IN2 32
+#define F_IN3 34
+#define F_IN4 36
+//G자재투입머신
+#define G_IN1 39
+#define G_IN2 41
+#define G_IN3 43
+#define G_IN4 45
+//H자재분배기
+#define H_IN1 38
+#define H_IN2 40
+#define H_IN3 42
+#define H_IN4 44
+#define I_IN1 47
+#define I_IN2 49
+#define I_IN3 46
+#define I_IN4 48
+
+#define homing_speed 500
+
+// Define a stepper and the pins it will use
+AccelStepper stepperA(8,A_IN4,A_IN2,A_IN3,A_IN1); //low
+AccelStepper stepperB(8,B_IN4,B_IN2,B_IN3,B_IN1); //high
+AccelStepper stepperC(8,C_IN4,C_IN2,C_IN3,C_IN1); //gripper
+AccelStepper stepperD(8,D_IN4,D_IN2,D_IN3,D_IN1); //rot
+AccelStepper stepperE(8,E_IN4,E_IN2,E_IN3,E_IN1); //finger
+AccelStepper belt(8,F_IN4,F_IN2,F_IN3,F_IN1); //belt
+AccelStepper product_machine(8,G_IN4,G_IN2,G_IN3,G_IN1); //product
+AccelStepper spliter(8,H_IN4,H_IN2,H_IN3,H_IN1); //spliter
+
+int max_speed = 1000;
+int acc = 1000;
+
+int max_speed2 = 1000;
+int acc2 = 1000;
+unsigned long main_t = 0;
+
+bool gripper_state = false;
+long motor_pos[] = {0,0,0,0};
+long old_pos[] = {0,0,0,0};
+
+float rot,low,high;
+float old_rot,old_low,old_high;
+float xmm,  ymm,  zmm;
+float global_x;
+float global_y;
+float global_z;
+long degree2step(float degree){
+  return 4096L*4*(degree/360);
+}
+float step2degree(long mystep){
+  return 360*mystep/4096.0/4.0;
+}
+
+void setup()
+{  
+  Serial.begin(9600);
+
+  //pinMode(ir_belt,INPUT);
+  
+  // Change these to suit your stepper if you want
+  stepperA.setMaxSpeed(max_speed);
+  stepperA.setAcceleration(acc);
+  stepperB.setMaxSpeed(max_speed);
+  stepperB.setAcceleration(acc);
+  stepperC.setMaxSpeed(max_speed);
+  stepperC.setAcceleration(acc);
+  stepperD.setMaxSpeed(max_speed);
+  stepperD.setAcceleration(acc);
+  stepperE.setMaxSpeed(max_speed);
+  stepperE.setAcceleration(acc);
+  belt.setMaxSpeed(max_speed);
+  belt.setAcceleration(acc);
+  spliter.setMaxSpeed(max_speed);
+  spliter.setAcceleration(acc);
+  product_machine.setMaxSpeed(max_speed);
+  product_machine.setAcceleration(max_speed);
+  //Serial.println("시작");
+}
+
+void loop()
+{
+  
+  if(millis() - main_t > 100){
+    main_t = millis();
+    Serial.print(rot*(180/PI));
+    Serial.print(",");
+    Serial.print(global_y);
+    Serial.print(",");
+    Serial.print(global_z);
+    Serial.print(",");
+    Serial.print(stepperA.currentPosition());
+    Serial.print(",");
+    Serial.print(stepperB.currentPosition());
+    Serial.print(",");
+    Serial.print(stepperC.currentPosition());
+    Serial.print(",");
+    Serial.print(stepperD.currentPosition());
+    Serial.print(",");
+    Serial.print(stepperA.isRunning()||stepperB.isRunning()||stepperC.isRunning()||stepperD.isRunning());
+    Serial.print(",");
+    Serial.print(gripper_state);
+    //Serial.print(",");
+    //Serial.print(!digitalRead(ir_belt));
+    Serial.println();
+  }
+  
+  if(Serial.available()){
+    String data = Serial.readStringUntil('\n');
+    data.replace("\r", "");
+    data.toUpperCase();
+
+    if(data[0] == 'G'){
+      //G1 X~ Y~ Z~
+      int pos1 = data.indexOf(' ');
+      int pos2 = data.indexOf(' ',pos1+1);
+      int pos3 = data.indexOf(' ',pos2+1);
+      String cmd1 = data.substring(pos1+2,pos2);
+      String cmd2 = data.substring(pos2+2,pos3);
+      String cmd3 = data.substring(pos3+2,data.length());
+
+      float xpos = cmd1.toFloat();
+      float ypos = cmd2.toFloat();
+      float zpos = cmd3.toFloat();
+
+      nockanda_ik(xpos,ypos,zpos);
+    }else if(data[0] == 'M'){
+      if(data == "M17"){
+        nockanda_ik(0,13.4,92.63);
+      }else if(data == "M18"){
+        global_x = 0;
+        global_y = 0;
+        global_z = 0;
+        stepperA.setMaxSpeed(homing_speed);
+        stepperA.setAcceleration(homing_speed);
+        stepperB.setMaxSpeed(homing_speed);
+        stepperB.setAcceleration(homing_speed);
+        stepperC.setMaxSpeed(homing_speed);
+        stepperC.setAcceleration(homing_speed);
+        stepperD.setMaxSpeed(homing_speed);
+        stepperD.setAcceleration(homing_speed);
+        stepperE.setMaxSpeed(homing_speed);
+        stepperE.setAcceleration(homing_speed);
+        stepperA.moveTo(0);
+        stepperB.moveTo(0);
+        stepperC.moveTo(0);
+        stepperD.moveTo(0);
+        stepperE.moveTo(0);
+      }else if(data == "M3"){
+        //그리퍼작동
+        gripper_state = true;
+        stepperE.moveTo(-600);
+      }else if(data == "M5"){
+        //그리퍼안작동
+        gripper_state = false;
+        stepperE.moveTo(0);
+      }else if(data == "M7"){
+        //자재투입머신전진
+        product_machine.moveTo(-5000);
+      }else if(data == "M9"){
+        //자재투입머신후진(원위치)
+        product_machine.moveTo(0);
+      }else if(data == "M11"){
+        belt.moveTo(6500*3);
+      }else if(data == "M13"){
+        belt.moveTo(0);
+      }else if(data == "M15"){
+        spliter.moveTo(-512);
+      }else if(data == "M16"){
+        spliter.moveTo(0);
+      }
+    }
+    
+  }
+    stepperA.run();
+    stepperB.run();
+    stepperC.run();
+    stepperD.run();
+    stepperE.run();
+    product_machine.run();
+    belt.run();
+    spliter.run();
+}
+
+void set_pos(long pos1,long pos2,long rotate){
+  long pos3 = (1024*4)+(pos1+pos2);
+  
+  motor_pos[0] = stepperA.currentPosition()-pos1;
+  motor_pos[1] = stepperB.currentPosition()-pos2;
+  motor_pos[2] = stepperC.currentPosition()-pos3; //이동량800
+  motor_pos[3] = stepperD.currentPosition()-rotate;
+
+  old_pos[0] = pos1;
+  old_pos[1] = pos2;
+  old_pos[2] = pos3;
+  old_pos[3] = rotate;
+
+  if(motor_pos[0] == 0 && motor_pos[1] == 0 && motor_pos[3] == 0){
+    return;
+  }
+  
+  int max_i = 0;
+  long max_v = 0;
+  for(int i = 0;i<4;i++){
+    if(max_v < abs(motor_pos[i])){
+      max_v = abs(motor_pos[i]);
+      max_i = i;
+    }
+  }
+
+  float ratio1 = abs(motor_pos[0] / (float)motor_pos[max_i]);
+  float ratio2 = abs(motor_pos[1] / (float)motor_pos[max_i]);
+  float ratio3 = abs(motor_pos[2] / (float)motor_pos[max_i]);
+  float ratio4 = abs(motor_pos[3] / (float)motor_pos[max_i]);
+
+  if(ratio1 != 0){
+    stepperA.setMaxSpeed(max_speed*ratio1);
+    stepperA.setAcceleration(acc*ratio1);
+    stepperA.moveTo(pos1);
+  }
+  if(ratio2 != 0){
+    stepperB.setMaxSpeed(max_speed*ratio2);
+    stepperB.setAcceleration(acc*ratio2);
+    stepperB.moveTo(pos2);
+  }
+  if(ratio3 != 0){
+    stepperC.setMaxSpeed(max_speed*ratio3);
+    stepperC.setAcceleration(acc*ratio3);
+    stepperC.moveTo(pos3);
+  }
+  if(ratio4 != 0){
+    stepperD.setMaxSpeed(max_speed*ratio4);
+    stepperD.setAcceleration(acc*ratio4);
+    stepperD.moveTo(rotate);
+  }
+
+}
+
+void nockanda_ik(float t_x,float t_y,float t_z){
+  global_x = t_x;
+  global_y = t_y;
+  global_z = t_z;
+    calculate_angles(t_x,t_y,t_z);
+    float myrot = 0;
+    float mylow = 0;
+    float myhigh = 0;
+    if(isnan(rot)){
+      myrot = degree2step(old_rot*(180/PI));
+    }else{
+      myrot = degree2step(rot*(180/PI));
+    }
+    if(isnan(low)){
+      mylow = degree2step(old_low*(180/PI)*-1);
+    }else{
+      mylow = degree2step(low*(180/PI)*-1);
+    }
+    if(isnan(high)){
+      myhigh = degree2step(old_high*(180/PI)*-1);
+    }else{
+      myhigh = degree2step(high*(180/PI)*-1);
+    }
+    set_pos(mylow,myhigh,myrot);
+    old_rot = rot;
+    old_low = low;
+    old_high = high;
+    
+}
+
+// 각도 계산 함수
+void calculate_angles(float xmm, float ymm, float zmm) {
+    float rrot = sqrt(xmm * xmm + ymm * ymm);
+    float rside = sqrt(rrot * rrot + zmm * zmm);
+    rot = xmm * (PI / 180.0);
+
+    float distance_to_target = sqrt(ymm * ymm + zmm * zmm);
+    if (distance_to_target > (80 + 80)) {
+        printf("목표 지점이 팔 길이를 초과합니다.\n");
+        return;
+    }
+    high = acos((distance_to_target * distance_to_target - 80 * 80 - 80 * 80) / (2 * 80 * 80));
+    
+    float k1 = 80 + 80 * cos(high);
+    float k2 = 80 * sin(high);
+    low = atan2(ymm, zmm) - atan2(k2, k1);
+    
+}
